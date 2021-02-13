@@ -5,23 +5,18 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"manga-magnet-crawler/models"
-	"manga-magnet-crawler/modules"
 	"net/http"
 	"os"
 	"regexp"
 	"strconv"
+	"time"
+
+	"github.com/inuad/manga-magnet-crawler/models"
+	"github.com/inuad/manga-magnet-crawler/modules"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/joho/godotenv"
-	"github.com/nleeper/goment"
 )
-
-type Chapter struct {
-	Name string
-	Link string
-	Date string
-}
 
 func main() {
 	err := godotenv.Load(".env")
@@ -35,12 +30,12 @@ func main() {
 	// Mongo Conntection Initialized
 	dbClient := modules.MongoDBConnect(ctx)
 
-	// Implement interface
-	var mangaListModel models.MangaRepository
-	mangaListModel = models.MangaListModel{dbClient.Database(os.Getenv("MONGO_DB_NAME"))}
+	mangaMagnetModel := models.MangaMagnetModel{dbClient.Database(os.Getenv("MONGO_DB_NAME"))}
 
 	// Get Manga List
-	for _, m := range mangaListModel.GetMangaList() {
+	for _, m := range mangaMagnetModel.GetMangaList() {
+		fmt.Println("Start download : " + m.Name)
+
 		res, err := http.Get(m.Link)
 		if err != nil {
 			log.Fatal(err)
@@ -53,28 +48,33 @@ func main() {
 		}
 
 		// Create manga assets folder
-		err = CreateFolder("./assets/" + m.UriName)
+		err = CreateFolder(os.Getenv("STORAGE_PATH") + m.UriName + "/")
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		arrChapter := []Chapter{}
 		doc.Find("div#chapters > div.row").EachWithBreak(func(i int, gq *goquery.Selection) bool {
 			//Skip headers row
 			if i != 0 {
 
-				//Limit
-				if i <= 1 {
+				// Limit
+				if i <= 5 {
 					rawChapterName := gq.Find("div.chapter-row > div:nth-child(2)").Text()
 					chapterName := regexp.MustCompile(`(?m)\s`).ReplaceAllString(rawChapterName, "")
 
+					r, err := mangaMagnetModel.GetLatestChapter(m.ID, chapterName)
+					if err == nil {
+						if chapterName == r.ChapterName {
+							fmt.Println("Chapter is up to date, " + chapterName + " skip...")
+							return false
+						}
+					}
 					link, _ := gq.Find("div.chapter-row > div:nth-child(2) > a").Attr("href")
 
-					d, _ := gq.Find("div.chapter-row > div:nth-child(4)").Attr("title")
-					dateAdded, _ := goment.New(d, "YYYY-MM-DD HH:mm:ss z (Z)")
+					// d, _ := gq.Find("div.chapter-row > div:nth-child(4)").Attr("title")
+					// dateAdded, _ := goment.New(d, "YYYY-MM-DD HH:mm:ss z (Z)")
 
-					arrChapter = append(arrChapter, Chapter{Name: chapterName, Link: link, Date: dateAdded.Format()})
-
+					// Request chapter page
 					url := os.Getenv("WEB_MANGA") + link
 					res, err := http.Get(url)
 					if err != nil {
@@ -86,17 +86,20 @@ func main() {
 						log.Fatal(err)
 					}
 
-					if _, err := os.Stat("./assets/" + m.UriName + "/" + chapterName); os.IsNotExist(err) {
-						os.MkdirAll("./assets/"+m.UriName+"/"+chapterName, os.ModePerm)
+					if _, err := os.Stat(os.Getenv("STORAGE_PATH") + m.UriName + "/" + chapterName); os.IsNotExist(err) {
+						os.MkdirAll(os.Getenv("STORAGE_PATH")+m.UriName+"/"+chapterName, os.ModePerm)
 					}
 
-					docPage.Find("div.chapter_images-container > img").EachWithBreak(func(j int, gqDocPage *goquery.Selection) bool {
+					var arrImagePath []string
+					docPage.Find("div[class*='chapter-images-container'] > img").EachWithBreak(func(j int, gqDocPage *goquery.Selection) bool {
 						imgLink, _ := gqDocPage.Attr("src")
+
 						res, _ := http.Get(os.Getenv("WEB_MANGA") + imgLink)
 						defer res.Body.Close()
 
-						path := "./assets/" + m.UriName + "/" + chapterName + "/" + strconv.Itoa(j) + ".jpg"
-						fmt.Println(path)
+						pathWithName := chapterName + "/" + strconv.Itoa(j) + ".jpg"
+						path := os.Getenv("STORAGE_PATH") + m.UriName + "/" + pathWithName
+						arrImagePath = append(arrImagePath, pathWithName)
 						img, _ := os.Create(path)
 						defer img.Close()
 
@@ -106,6 +109,10 @@ func main() {
 						return true
 					})
 
+					chapterStruct := models.Chapter{m.ID, chapterName, link, arrImagePath, time.Now()}
+					mangaMagnetModel.SetMangaChapter(&chapterStruct)
+					fmt.Println(chapterName + " Done.")
+
 					return true
 				}
 
@@ -114,21 +121,15 @@ func main() {
 			return true
 		})
 
-		fmt.Println(arrChapter)
 	}
 }
 
 func CreateFolder(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err != nil {
-			return err
-		}
-
 		err = os.MkdirAll(path, os.ModePerm)
 		if err != nil {
 			return err
 		}
-
 	}
 	return nil
 }
