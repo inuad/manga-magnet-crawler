@@ -58,8 +58,9 @@ func main() {
 			if i != 0 {
 
 				// Limit
-				if i <= 5 {
-					rawChapterName := gq.Find("div.chapter-row > div:nth-child(2)").Text()
+				if i <= 1 {
+					rawParentChapterName := gq.Find("div.chapter-row > div:nth-child(2)")
+					rawChapterName := rawParentChapterName.Find("a:last-of-type > div:last-child").Text()
 					chapterName := regexp.MustCompile(`(?m)\s`).ReplaceAllString(rawChapterName, "")
 
 					r, err := mangaMagnetModel.GetLatestChapter(m.ID, chapterName)
@@ -69,7 +70,7 @@ func main() {
 							return false
 						}
 					}
-					link, _ := gq.Find("div.chapter-row > div:nth-child(2) > a").Attr("href")
+					link, _ := gq.Find("div.chapter-row > div:nth-child(2) > a:last-of-type").Attr("href")
 
 					// d, _ := gq.Find("div.chapter-row > div:nth-child(4)").Attr("title")
 					// dateAdded, _ := goment.New(d, "YYYY-MM-DD HH:mm:ss z (Z)")
@@ -91,7 +92,7 @@ func main() {
 					}
 
 					var arrImagePath []string
-					docPage.Find("div[class*='chapter-images-container'] > img").EachWithBreak(func(j int, gqDocPage *goquery.Selection) bool {
+					docPage.Find("div[class*='chapter-images'] > img").EachWithBreak(func(j int, gqDocPage *goquery.Selection) bool {
 						imgLink, _ := gqDocPage.Attr("src")
 
 						res, _ := http.Get(os.Getenv("WEB_MANGA") + imgLink)

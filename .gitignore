@@ -2,3 +2,4 @@ assets
 .env
 go.sum
 configs
+manga-magnet-crawler
